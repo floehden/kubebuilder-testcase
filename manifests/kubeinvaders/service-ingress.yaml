@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubeinvaders
+  namespace: kubeinvaders
+spec:
+  selector:
+    app: kubeinvaders
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kubeinvaders
+  namespace: kubeinvaders
+  annotations:
+    # The game polls/streams constantly - don't let the proxy cut it off.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  rules:
+    # *.localtest.me resolves to 127.0.0.1 via public DNS - no hosts file edit.
+    - host: kubeinvaders.localtest.me
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: kubeinvaders
+                port:
+                  number: 8080

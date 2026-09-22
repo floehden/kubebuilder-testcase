@@ -1,0 +1,53 @@
+# RBAC as documented upstream (lucky-sideburn/kubeinvaders).
+# NOTE: the namespace MUST be called "kubeinvaders" - the app does not support
+# running in a differently named namespace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kubeinvaders
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kinv-cr
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["delete"]
+  - apiGroups: ["batch", "extensions"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["get", "watch", "list"]
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kinv-sa
+  namespace: kubeinvaders
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kinv-crb
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kinv-cr
+subjects:
+  - kind: ServiceAccount
+    name: kinv-sa
+    namespace: kubeinvaders
+---
+# Long-lived token. The in-cluster Deployment does not need it (it uses the
+# projected SA token), but scripts/run-kubeinvaders-docker.sh does, and a
+# non-expiring token is one less thing to break mid-demo.
+apiVersion: v1
+kind: Secret
+type: kubernetes.io/service-account-token
+metadata:
+  name: kinv-sa-token
+  namespace: kubeinvaders
+  annotations:
+    kubernetes.io/service-account.name: kinv-sa

@@ -1,0 +1,206 @@
+# Three workloads with deliberately different resilience characteristics.
+# The whole point of the showcase: kill each one and watch what the user sees.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shop
+---
+# 1) frontend - the "done right" workload.
+#    6 replicas, spread across nodes, fast readiness, image pre-pulled.
+#    Killing aliens here does NOT take the site down.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: shop
+  labels:
+    app: frontend
+spec:
+  replicas: 16
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      terminationGracePeriodSeconds: 5
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: frontend
+      containers:
+        - name: whoami
+          image: docker.io/traefik/whoami:v1.10.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 1
+            periodSeconds: 2
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+---
+# PDB on purpose: great talking point. A PDB guards *evictions*, not deletes.
+# KubeInvaders deletes pods, so this will NOT save you.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: frontend
+  namespace: shop
+spec:
+  minAvailable: 50%
+  selector:
+    matchLabels:
+      app: frontend
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: shop
+spec:
+  selector:
+    app: frontend
+  ports:
+    - port: 80
+      targetPort: 80
+---
+# 2) cart-api - slow to become ready (20s). Survives a kill, but recovery
+#    is visible in the "Current Replicas State Delay" metric.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cart-api
+  namespace: shop
+  labels:
+    app: cart-api
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: cart-api
+  template:
+    metadata:
+      labels:
+        app: cart-api
+    spec:
+      terminationGracePeriodSeconds: 5
+      containers:
+        - name: whoami
+          image: docker.io/traefik/whoami:v1.10.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 20
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cart-api
+  namespace: shop
+spec:
+  selector:
+    app: cart-api
+  ports:
+    - port: 80
+      targetPort: 80
+---
+# 3) legacy-db - single replica, no redundancy. One shot = full outage.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: legacy-db
+  namespace: shop
+  labels:
+    app: legacy-db
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: legacy-db
+  template:
+    metadata:
+      labels:
+        app: legacy-db
+    spec:
+      terminationGracePeriodSeconds: 5
+      containers:
+        - name: whoami
+          image: docker.io/traefik/whoami:v1.10.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: legacy-db
+  namespace: shop
+spec:
+  selector:
+    app: legacy-db
+  ports:
+    - port: 80
+      targetPort: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shop
+  namespace: shop
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: shop.localtest.me
+      http:
+        paths:
+          - path: /cart
+            pathType: Prefix
+            backend:
+              service:
+                name: cart-api
+                port:
+                  number: 80
+          - path: /db
+            pathType: Prefix
+            backend:
+              service:
+                name: legacy-db
+                port:
+                  number: 80
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80

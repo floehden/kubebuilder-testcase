@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubeinvaders
+  namespace: kubeinvaders
+  labels:
+    app: kubeinvaders
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kubeinvaders
+  template:
+    metadata:
+      labels:
+        app: kubeinvaders
+    spec:
+      serviceAccountName: kinv-sa
+      containers:
+        - name: kubeinvaders
+          # Pin this to a released tag once you know which one you demoed with.
+          image: docker.io/luckysideburn/kubeinvaders:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            # Comma-separated target namespaces. You can also switch/add
+            # namespaces at runtime from the game UI.
+            - name: NAMESPACE
+              value: "shop,default"
+            # Where the browser reaches the game. Upstream docs show both names
+            # depending on version, so set both - the unused one is ignored.
+            - name: APPLICATION_URL
+              value: "http://kubeinvaders.localtest.me:8080"
+            - name: ENDPOINT
+              value: "kubeinvaders.localtest.me:8080"
+            # kind's API cert is not in the image's trust store. The nginx/Lua
+            # layer that does the connection test reads DISABLE_TLS (declared in
+            # nginx.conf's env list) and maps it to LuaSec verify="none".
+            # INSECURE_ENDPOINT is NOT in that env list and has no effect here.
+            - name: DISABLE_TLS
+              value: "true"
+            - name: INSECURE_ENDPOINT
+              value: "true"
+            # Difficulty knobs (honoured by the legacy engine; harmless otherwise).
+            # ALIENPROXIMITY: lower = aliens closer together
+            # HITSLIMIT:      CPU seconds to wait before shooting again
+            # UPDATETIME:     seconds between pod-state refreshes (0.5 is snappy)
+            - name: ALIENPROXIMITY
+              value: "100"
+            - name: HITSLIMIT
+              value: "1"
+            - name: UPDATETIME
+              value: "1"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+          # Workaround for an upstream bug in pod.lua: the 'elseif' at ~line 254
+          # calls tonumber(pods_not_running_on) without the ngx.null guard that
+          # the preceding 'if' has. When that Redis key is unset, tonumber()
+          # returns nil, 'nil > 1' aborts the Lua thread, and every
+          # GET /kube/pods returns 500 ("attempt to compare number with nil").
+          # Seeding the counters keeps them numeric. Redis has no persistence
+          # here, so this has to run on every container start.
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - sh
+                  - -c
+                  - |
+                    for i in $(seq 1 60); do
+                      redis-cli ping >/dev/null 2>&1 && break
+                      sleep 1
+                    done
+                    redis-cli setnx pods_not_running_on_selected_ns 0
+                    redis-cli setnx fewer_replicas_time 0
+                    redis-cli setnx fewer_replicas_seconds 0
+                    redis-cli setnx latest_fewer_replicas_seconds 0
