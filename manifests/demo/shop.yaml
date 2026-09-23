@@ -16,7 +16,7 @@ metadata:
   labels:
     app: frontend
 spec:
-  replicas: 16
+  replicas: 6
   selector:
     matchLabels:
       app: frontend
@@ -85,7 +85,7 @@ metadata:
   labels:
     app: cart-api
 spec:
-  replicas: 5
+  replicas: 3
   selector:
     matchLabels:
       app: cart-api
@@ -133,7 +133,7 @@ metadata:
   labels:
     app: legacy-db
 spec:
-  replicas: 3
+  replicas: 1
   selector:
     matchLabels:
       app: legacy-db
